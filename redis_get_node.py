@@ -15,8 +15,8 @@ class Datagetter :
         self.data = { "surge": 0, "sway": 0, "heave": 0, "yaw": 0 }
         self.stream_name = "joystickStream"
         self.stream_name_state = "vehicle_state"
-        self.velocity= json.dumps([0,0,0])
-        self.orientation = json.dumps([0,0,0])
+        self.velocity= [0,0,0]
+        self.orientation = [0,0,0]
         self.state = {"northing":0,"easting":0,"depth":0,"velocity":self.velocity,"orientation":self.orientation}
         self.last_id = 0
         self.e = 0
@@ -93,16 +93,22 @@ class Datagetter :
     
     def state_callback(self,msg):
         try:
-            self.state["northing"]=msg.position.north
-            self.state["easting"]=msg.position.east
-            self.state["depth"]=msg.position.depth
-            self.state["velocity"]=json.dumps([msg.seafloor_velocity.x,msg.seafloor_velocity.y,msg.seafloor_velocity.z])
-            self.state["orientation"]["x"]=json.dumps([msg.orientation.x,msg.orientation.y,msg.orientation.z])
+            self.state["northing"] = msg.position.north
+            self.state["easting"] = msg.position.east
+            self.state["depth"] = msg.position.depth
+            self.state["velocity"] = [msg.seafloor_velocity.x, msg.seafloor_velocity.y, msg.seafloor_velocity.z]
+            self.state["orientation"] = [msg.orientation.x, msg.orientation.y, msg.orientation.z]
 
-            # Read data from the Redis stream
-            message = json.dumps(self.state)
+            # Convert lists to JSON strings before storing in Redis
+            state_to_store = {
+            "northing": self.state["northing"],
+            "easting": self.state["easting"],
+            "depth": self.state["depth"],
+            "velocity": json.dumps(self.state["velocity"]),
+            "orientation": json.dumps(self.state["orientation"]),
+            }
             print("debug")
-            self.db.xadd("vehicle_state",self.state)
+            self.db.xadd("vehicle_state",state_to_store)
             # for stream_key, messages in response:
             #     for message_id, message_data in messages:
             #         # Decode byte strings to regular strings
