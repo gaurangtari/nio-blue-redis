@@ -21,7 +21,8 @@ class Datagetter :
         self.orientation = [0,0,0]
         self.max_depth = 10
         self.state = {"northing":0,"easting":0,"depth":0,"velocity":self.velocity,"orientation":self.orientation}
-        self.teleop_data = {}
+        self.teleop_rst = []
+        self.teleop_data = []
         self.last_id = 0
         self.e = 0
         self.teleop_mode = 0
@@ -71,6 +72,7 @@ class Datagetter :
         # print(self.data)
     
     def database_read(self):
+        print("database read")
         try:
             # Read data from the Redis stream
             x = self.pubsub.subscribe(self.channel)
@@ -81,7 +83,7 @@ class Datagetter :
                     self.depth += -0.1*self.data["heave"]
                     # print(self.depth)
                     self.depth = self.limit_val(self.depth,self.max_depth,0)
-                    print(self.depth)
+                    print("setting depth",self.depth)
             print("Subscription stopped by user.")
             self.teleop_mode = 0
         except redis.exceptions.ConnectionError as e: 
@@ -94,10 +96,12 @@ class Datagetter :
             self.pubsub.close()
     
     def teleop_read(self):
+        print("teleop read")
         try:
                 # Read data from the Redis stream
             response = self.db.xread({"nonJoyStream": self.last_id}, count=1, block=0)
             self.teleop_mode = 1
+            self.teleop_rst.append(rospy.Timer(rospy.Duration(6),self.teleop_reset, oneshot=True))
             for stream_key, messages in response:
                 for message_id, message_data in messages:
                         # Decode byte strings to regular strings
@@ -109,7 +113,7 @@ class Datagetter :
                         # Check if 'data' exists in message_data
                     if 'data' in message_data:
                             # Parse and print the message
-                        self.teleop_data = json.loads(message_data['data'])  # Convert the JSON string to a Python dict
+                        self.teleop_data.append(json.loads(message_data['data'])) # Convert the JSON string to a Python dict
                         print(f"Message ID: {message_id}")
                         print(f"Data: {self.teleop_data}, Type: {type(self.teleop_data)}")
                         # Update last_id to the current message ID
@@ -126,10 +130,31 @@ class Datagetter :
         except Exception as e:
             e =e
             print(f"Error reading from stream: {e}")
+    
+    def teleop_reset(self,event):
+        print("\n\nteleop reset\n\n")
+        self.teleop_mode = 0
+        if self.teleop_data[0]['value'] == "UP":
+            self.data["depth"]=self.limit_val(self.state["depth"]+1,self.max_depth,0)
+            print(self.limit_val(self.state["depth"]+1,self.max_depth,0))
+        elif self.teleop_data[0]['value'] == "DOWN":
+            self.data["depth"]=self.limit_val(self.state["depth"]-1,self.max_depth,0)
+            print(self.limit_val(self.state["depth"]+1,self.max_depth,0))
+        elif self.teleop_data[0]['value'] == "LEFT":
+            # self.data["sway"]=self.limit_val(self.data["sway"]+1,5,-5)
+            self.data["sway"]=0
+        elif self.teleop_data[0]["value"] == "RIGHT":  
+            self.data["sway"]=self.limit_val(self.state["sway"]-1,5,-5)
+        elif self.teleop_data[0]['value'] == "FORWARD":
+            self.data["surge"]=0
+        elif self.teleop_data[0]["value"] == "BACKWARD": 
+            self.data["surge"]=0
+        self.teleop_data.pop(0)
 
 
     def pub_timer_callback(self,event):
-        if not(self.e) and self.teleop_mode :
+        if not(self.e) :
+            print("publishing:",self.data["sway"])
             self.surge_pub.publish(Float64(5*self.data['surge']))
             self.sway_pub.publish(Float64(5*self.data['sway']))
             self.heave_pub.publish(Float64(self.depth))
@@ -186,17 +211,23 @@ class Datagetter :
 
     def teleop_callback(self,event):
         self.teleop_read()
-        if self.teleop_mode:         
-            if self.teleop_data['value'] == "UP":
-                self.heave_pub.publish(self.limit_val(self.state["depth"]-1,self.max_depth,0))
-            elif self.teleop_data['value'] == "DOWN":
-                self.heave_pub.publish(self.limit_val(self.state["depth"]+1,self.max_depth,0))
-            elif self.teleop_data['value'] == "LEFT":
-                self.sway_pub.publish(-0.5)
-                rospy.sleep(rospy.Duration(2))
-            elif self.teleop_data["value"] == "RIGHT":  # Handle "RIGHT" or other unexpected cases
-                self.sway_pub.publish(0.5)
-                rospy.sleep(rospy.Duration(2))
+        if self.teleop_mode:      
+            print("teleop callback")   
+            if self.teleop_data[0]['value'] == "UP":
+                self.data["depth"]=self.limit_val(self.state["depth"]-1,self.max_depth,0)
+            elif self.teleop_data[0]['value'] == "DOWN":
+                self.data["depth"]=self.limit_val(self.state["depth"]+1,self.max_depth,0)
+            elif self.teleop_data[0]['value'] == "LEFT":
+                # self.data["sway"]=self.limit_val(self.data["sway"]-1,5,-5)
+                self.data["sway"]=-0.125
+            elif self.teleop_data[0]["value"] == "RIGHT":  # Handle "RIGHT" or other unexpected cases
+                self.data["sway"]=0.125
+            elif self.teleop_data[0]['value'] == "FORWARD":
+                # self.data["sway"]=self.limit_val(self.data["sway"]-1,5,-5)
+                self.data["surge"]=1.5
+            elif self.teleop_data[0]["value"] == "BACKWARD":  # Handle "RIGHT" or other unexpected cases
+                self.data["surge"]=-1.5
+            
 
     def get_time(self):
 
